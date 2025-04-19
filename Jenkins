@@ -1,0 +1,134 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ENV', choices: ['dev', 'stage', 'prod'], description: 'Select the deployment environment')
+    }
+
+    environment {
+        TEMPLATE_FILE = 'code.yaml'
+        AWS_REGION = 'us-east-1'
+        STACK_NAME = 'Techplement-project'
+        VPC_CIDR = '10.0.0.0/16'
+        PUBLIC_SUBNET_CIDR = '10.0.1.0/24'
+        PRIVATE_SUBNET_CIDR = '10.0.2.0/24'
+        INSTANCE_TYPE = 't2.micro'
+        KEY_PAIR_NAME = 'Techplement'
+    }
+
+    stages {
+        stage('Set Environment Config') {
+            steps {
+                script {
+                    def envConfig = [
+                        dev: [
+                            STACK_NAME: 'Techplement-project',
+                            VPC_CIDR: '10.0.0.0/16',
+                            PUBLIC_SUBNET_CIDR: '10.0.1.0/24',
+                            PRIVATE_SUBNET_CIDR: '10.0.2.0/24',
+                            INSTANCE_TYPE: 't2.micro',
+                            KEY_PAIR_NAME: 'Techplement'
+                        ],
+                        stage: [
+                            STACK_NAME: 'Techplement-project',
+                            VPC_CIDR: '10.1.0.0/16',
+                            PUBLIC_SUBNET_CIDR: '10.1.1.0/24',
+                            PRIVATE_SUBNET_CIDR: '10.1.2.0/24',
+                            INSTANCE_TYPE: 't2.micro',
+                            KEY_PAIR_NAME: 'Techplement'
+                        ],
+                        prod: [
+                            STACK_NAME: 'Techplement-project',
+                            VPC_CIDR: '10.2.0.0/16',
+                            PUBLIC_SUBNET_CIDR: '10.2.1.0/24',
+                            PRIVATE_SUBNET_CIDR: '10.2.2.0/24',
+                            INSTANCE_TYPE: 't2.micro',
+                            KEY_PAIR_NAME: 'Techplement'
+                        ]
+                    ]
+
+                    def config = envConfig[params.ENV]
+                    env.STACK_NAME = config.STACK_NAME
+                    env.VPC_CIDR = config.VPC_CIDR
+                    env.PUBLIC_SUBNET_CIDR = config.PUBLIC_SUBNET_CIDR
+                    env.PRIVATE_SUBNET_CIDR = config.PRIVATE_SUBNET_CIDR
+                    env.INSTANCE_TYPE = config.INSTANCE_TYPE
+                    env.KEY_PAIR_NAME = config.KEY_PAIR_NAME
+
+                    echo "🔧 Selected environment: ${params.ENV}"
+                    echo "🧾 Stack: ${env.STACK_NAME}, VPC: ${env.VPC_CIDR}, KeyPair: ${env.KEY_PAIR_NAME}"
+                }
+            }
+        }
+
+        stage('Checkout Code') {
+            steps {
+                 git credentialsId: 'github-credentials', url: 'https://github.com/Anilyedururi/Tech-project'
+            }
+        }
+
+        stage('Validate Template') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-project-credentials',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh """
+                        echo " AWS_ACCESS_KEY_ID is AKIA5B4DRVQSQL2OEMWP"
+                        echo " AWS_SECRET_ACCESS_KEY_ID is lEVWmcnh2V4oOSXU2rJXLNBNDXfyfhMglXfvfeST"
+                        echo " Validating CloudFormation template..."
+                        aws sts get-caller-identity --region us-east-1
+
+                        aws cloudformation validate-template \
+                            --template-body file://code.yaml \
+                            --region us-east-1
+                    """
+                }
+            }
+        }
+
+        stage('Deploy CloudFormation Stack') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-project-credentials',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh """
+                        echo " AWS_ACCESS_KEY_ID is AKIA5B4DRVQSQL2OEMWP"
+                        echo " AWS_SECRET_ACCESS_KEY_ID is lEVWmcnh2V4oOSXU2rJXLNBNDXfyfhMglXfvfeST"
+                        aws cloudformation deploy \
+                            --template-file code.yaml \
+                            --stack-name Techplement-project \
+                            --capabilities CAPABILITY_NAMED_IAM \
+                            --region us-east-1 \
+                            --parameter-overrides \
+                                VpcCIDR=10.0.0.0/16 \
+                                PublicSubnetCIDR=10.0.1.0/24 \
+                                PrivateSubnetCIDR=10.0.2.0/24 \
+                                InstanceType=t2.micro \
+                                KeyPairName=Techplement
+                    """
+                }
+            }
+        }
+
+        stage('Post-Deploy Test') {
+            steps {
+                echo " Deployment complete for ${params.ENV} environment."
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo ' Deployment failed.'
+        }
+        success {
+            echo ' All stages completed successfully!'
+        }
+    }
+}
